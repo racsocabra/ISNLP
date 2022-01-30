@@ -1,0 +1,360 @@
+---
+title: "NLP"
+output: html_document
+---
+
+The problem proposed in this notebook is to analyze a subset of tweets from the premier league and analyze it using sentiment analysis to determine whether the impact of social networks influence on the teams and player results.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# This R environment comes with many helpful analytics packages installed
+# It is defined by the kaggle/rstats Docker image: https://github.com/kaggle/docker-rstats
+# For example, here's a helpful package to load
+
+library(tidyverse) # metapackage of all tidyverse packages
+
+# Input data files are available in the read-only "../input/" directory
+# For example, running this (by clicking run or pressing Shift+Enter) will list all files under the input directory
+
+list.files(path = "../input")
+
+# You can write up to 20GB to the current directory (/kaggle/working/) that gets preserved as output when you create a version using "Save & Run All" 
+# You can also write temporary files to /kaggle/temp/, but they won't be saved outside of the current session
+
+```
+
+We set a seed to get the same results in different executions
+
+```{r}
+set.seed(123)  
+```
+
+## Read data
+
+First of all we will need to download the csv files from this link <https://www.kaggle.com/wjia26/epl-teams-twitter-sentiment-dataset> and unzip the file in the data folder.
+
+We will read the csv files, we will use this dataset <https://www.kaggle.com/wjia26/epl-teams-twitter-sentiment-dataset>. It contains tweets of all teams of the premier from 09-07-2020 to 20-09-2020.
+
+```{r}
+data <- read.csv('data/2020-07-09 till 2020-09-19.csv')
+#tweets2 <- read.csv('data/2020-09-20 till 2020-10-13.csv') 
+#data <- rbind(tweets1, tweets2)
+head(data)
+
+```
+
+As we can see we have some irrelevant information like:
+
+-   group_name
+
+-   screenname
+
+-   twitter_id
+
+-   username
+
+We will pop this info from the dataframe
+
+```{r}
+data$group_name <- NULL
+data$screenname <- NULL
+data$twitter_id <- NULL
+data$username <- NULL
+
+head(data)
+
+```
+
+Now we will proceed to clean the text.
+
+## Clean text
+
+First of all we check if the encoding is correct
+
+```{r}
+#install.packages('utf8')
+library(utf8)
+linesQ <- data$text
+#Chack encoding
+linesQ[!utf8_valid(linesQ)] #character(0) ==> All lines are made of correct UTF-8 characters
+```
+
+We get character(0) that means all lines are mead of correct UTF-8 characters. We can read every character so now we will start cleaning our text.
+
+We will start transforming emojis into text. This takes a while.
+
+```{r}
+library(textclean)
+linesQ <- replace_emoji(linesQ)
+linesQ <- replace_emoticon(linesQ)
+print(linesQ[1:5])
+```
+
+We will remove from the text unnecessary info like URL, mentions, hashtgas...
+
+```{r}
+#Remove RT
+linesQ <- gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", linesQ)
+#Remove mentions
+linesQ <- gsub("@\\w+", "", linesQ)
+#Remove links
+linesQ <-  gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+", "", linesQ)
+#Remove non alphanumeric chars
+linesQ <- gsub("[^a-zA-Z0-9 ]", "", linesQ)
+#Remove punctuation
+linesQ <- gsub("amp ", "", linesQ)
+#Remove Na
+linesQ <- linesQ[!is.na(linesQ)]
+#Spaces and tabs cleaning
+linesQ <- gsub("[ \t]{2,}", "", linesQ)
+linesQ <- gsub("^\\s+|\\s+$", "", linesQ)
+#Convert to lower case
+linesQ <- tolower(linesQ)
+
+head(linesQ, 5)
+```
+
+We check everything seems to be alright.
+
+## Data analysis using library tm
+
+First we create a corpus and apply some cleaning too
+
+```{r}
+library(tm)
+linesQCorpus <- Corpus(VectorSource(linesQ))
+corpus_clean <- tm_map(linesQCorpus, tolower)
+corpus_clean <- tm_map(corpus_clean, removeNumbers)
+corpus_clean <- tm_map(corpus_clean, removePunctuation)
+corpus_clean <- tm_map(corpus_clean, stripWhitespace)
+#Remove stopwords
+corpus_clean <- tm_map(corpus_clean, removeWords, stopwords('english'))
+```
+
+We create the document term matrix
+
+```{r}
+dtm <- DocumentTermMatrix(corpus_clean, control = list(minWordLength = 1, stopwords = TRUE))
+inspect(dtm)
+```
+
+And the most frequent terms are:
+
+```{r}
+head(findFreqTerms(dtm, lowfreq=10), 40)
+```
+
+This will be later visualized in a wordcloud
+
+## More EDA using spacyR and other resources
+
+This takes a long time.
+
+```{r}
+library(spacyr)
+#spacy_install()
+spacy_initialize(model = "en_core_web_sm")
+#Gets sentences from paragraphs
+phrases <- spacy_tokenize(linesQ, #If you use quanteda you can use
+# corpus_reshape(corpus, to = "sentences"))
+#Taks a while.
+what="sentence" #By default remove_separators = TRUE
+# (removes trailing spaces)
+)
+v_phrases <- unlist(phrases)
+numphrases <- length(v_phrases) #8,975 sentences
+sum(v_phrases=="") #1
+
+```
+
+What about the length of the sentences?
+
+```{r}
+#A simple histogram will do fine
+hist(nchar(v_phrases),
+main = "Histogram of sentence size",
+xlab = "Sentece size (number of characters)",
+ylab = "Ocurrences",
+xlim=c(0,1000)
+)
+```
+
+As it was expected there are a lot of sentences with very few characters, one of the reasons is the Twitter limit of characters per tweet.
+
+And what about the most frequent terms?
+
+```{r}
+  tokens <- spacy_tokenize(linesQ
+  #Parameters asigned by default:
+  #remove_punct = FALSE, punt symbols are tokens
+  #remove_url = FALSE, url elements are tokens
+  #remove_numbers = FALSE, numbers are tokens
+  #remove_separators = TRUE, spaces are NOT tokens
+  #remove_symbols = FALSE, symbols (like €) are tokens
+  )#Returns a list
+  v_tokens <- unlist(tokens)
+  v_tokens[1:10]
+
+```
+
+```{r}
+#As a simple plot
+plot(head(sort(table(v_tokens), decreasing = TRUE), n = 10),
+xlab = "Token",
+ylab = "Ocurrences"
+)
+
+```
+
+Most of these tokens are stopwords.
+
+We can see symbols \< \> are the most used these are related to emojis
+
+```{r}
+#spacy_finalize() #Do not forget this
+```
+
+```{r}
+data %>%
+  # UCT time in hh:mm format
+  mutate(created_at=substr(created_at, 12, 16)) %>%
+  count(created_at) %>%
+  ggplot(aes(x=as.numeric(as.factor(created_at)), y=n, group=1)) +
+  geom_line(size=1, show.legend=FALSE) +
+  geom_vline(xintercept=7, colour="red") +
+  labs(x="UCT time (hh:mm)", y="Number of Tweets") + 
+  theme_bw() +
+  scale_x_continuous(breaks=c(1,301,601,901,1201,1440),
+                     labels=c("00:00","05:00","10:00","15:00","20:00","23:59") )
+
+```
+
+Most of the tweets are tweeted during gametime.
+
+Number of words per tweet.
+
+```{r}
+data %>%
+  mutate(words_per_tweet=sapply(strsplit(text, " "), length)) %>%
+  ggplot(aes(x=words_per_tweet)) +
+  geom_histogram(bins=10, show.legend=FALSE) +
+  xlim(c(0,40)) +
+  theme_bw() +
+  labs(x="Words", y="Frequency")
+```
+
+## Sentiment analysis
+
+We will start the sentiment analysis part visualizing what are the most frequent positive and negative words. We will use bing lexicon(<https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html>).
+
+```{r}
+library(tidytext)
+library(wordcloud)
+library(wordcloud2)
+library(reshape2)
+
+# Tokens
+tokens <- data %>%  
+  unnest_tokens(word, text) %>%
+  select(word)
+
+# Positive and negative words 
+tokens %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort=TRUE) %>%
+  acast(word ~ sentiment, value.var="n", fill=0) %>%
+  comparison.cloud(colors=c("#F8766D", "#00BFC4"), max.words=200)
+```
+
+Using nrc lexicon(<http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm>) we can see the frequency of words according to the sentiment expressed.
+
+```{r}
+# Sentiments and frequency associated with each word  
+sentiments <- tokens %>% 
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, sort=TRUE) 
+
+# Frequency of each sentiment
+ggplot(data=sentiments, aes(x=reorder(sentiment, n, sum), y=n)) + 
+geom_bar(stat="identity", aes(fill=sentiment), show.legend=FALSE) +
+labs(x="Sentiment", y="Frequency") +
+theme_bw() +
+coord_flip()
+
+```
+
+And using AFINN lexicon (<http://www2.imm.dtu.dk/pubdb/pubs/6010-full.html>) we will get the words with highest and lowest sentiment scores.
+
+```{r}
+library(gridExtra)
+# Positive and negative words 
+top_positive <- tokens %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  count(word, value, sort=TRUE) %>%
+  arrange(desc(value)) %>%
+  head(n=10) %>%
+  ggplot(aes(x=reorder(word, value), y=value)) +
+  geom_bar(stat="identity", fill="#00BFC4", colour="black") +
+  theme_bw() +
+  labs(x="Positive words", y="value") +
+  coord_flip() 
+
+top_negative <- tokens %>% 
+  inner_join(get_sentiments("afinn")) %>%
+  count(word, value, sort=TRUE) %>%
+  arrange(value) %>%
+  head(n=10) %>%
+  ggplot(aes(x=reorder(word, -value), y=value)) +
+  geom_bar(stat="identity", fill="#F8766D", colour="black") +
+  theme_bw() +
+  labs(x="Negative words", y="value") +
+  coord_flip() 
+
+grid.arrange(top_positive, top_negative,
+             layout_matrix=cbind(1,2))
+```
+
+As we can see the negative words are very rude getting a very high negative value.
+
+We can take advantage of the dataset and use the polarity field that already express a sentiment score of each tweet and the file_name variable that associates each tweet to a team to see which are the teams who receive the best score.
+
+```{r}
+teams_score <-aggregate(data$polarity, by=list(File=data$file_name), FUN=sum)
+ordered <- teams_score[order(teams_score$x),]
+#As a simple plot
+p<-ggplot(data=ordered, aes(x=File, y=x)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90))
+p
+```
+
+## Named Entity Recognition
+
+Another interesting question to solve is. Is there a team or a player that receives more mentions than anothers? We will apply NER to solve this question. This takes a lot of time.
+
+```{r}
+library(spacyr)
+#spacy_install()
+spacy_initialize(model = "en_core_web_sm")
+entities <- spacy_parse(linesQ, lemma = FALSE, entity = TRUE) %>%
+    entity_extract() %>%
+    group_by(doc_id) %>%
+    summarize(ner_words = paste(entity, collapse = ", "))
+spacy_finalize() #Do not forget this
+```
+
+Now let's count the number of ocurreces.
+
+```{r}
+solution<-as.data.frame(entities)
+plot(
+  
+  head(sort(table(unlist(solution)), decreasing = TRUE), n = 10),
+xlab = "Entities",
+ylab = "Ocurrences"
+)
+```
